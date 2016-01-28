@@ -75,13 +75,10 @@ public:
       //if( cv::display_dst( DELAY_BLUR ) != 0 ) { return 0; } 
     }
     hsi_image = sf.rgb_to_hsi(filtered_image);
+    hsi_image = sf.trapezoidal_roi(hsi_image);
+    
 
-    cv::Mat mask = cv::Mat::zeros(hsi_image.size(), CV_8UC1);
-    cv::Point circleCenter(mask.cols / 2, mask.rows / 2);
-    int radius = 50;
-    cv::circle(mask, circleCenter, radius, CV_RGB(255, 255, 255));
-    cv::Mat imagePart = cv::Mat::zeros(hsi_image.size(), hsi_image.type());
-    hsi_image.copyTo(imagePart, mask);
+    //cv::Mat hist_hsi = sf.histogram_finder(hsi_image, filtered_image);
     // Update GUI Window
     cv::imshow(OPENCV_WINDOW, hsi_image);
     cv::waitKey(1);

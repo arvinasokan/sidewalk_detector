@@ -13,9 +13,11 @@ class Sidewalk_Filter
        Sidewalk_Filter();
        ~Sidewalk_Filter();
        cv::Mat rgb_to_hsi(const cv::Mat& src);
-
+       cv::Mat trapezoidal_roi(const cv::Mat& src);
+       cv::Mat histogram_finder(const cv::Mat& src, const cv::Mat& original);   
   private:
         cv::Mat src;    
-
+        cv::Mat hsi;
+        cv::Mat original;  
 };
 #endif
