@@ -160,12 +160,12 @@ public:
     alpha = 0.5;
     beta = ( 1.0 - alpha );
     addWeighted(new_image, alpha,cv_ptr->image , beta, 0.0, imageDest);
-    cv::imshow(OPENCV_WINDOW, imageDest);
-    cv::waitKey(1);
+    //cv::imshow(OPENCV_WINDOW, imageDest);
+    //cv::waitKey(1);
 
-
+    sensor_msgs::ImagePtr rgb_out = cv_bridge::CvImage(std_msgs::Header(), "bgr8", imageDest).toImageMsg();
     // Output modified video stream
-    image_pub_.publish(cv_ptr->toImageMsg());
+    image_pub_.publish(rgb_out);
   }
 void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
 
