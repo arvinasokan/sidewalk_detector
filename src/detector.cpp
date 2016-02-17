@@ -8,7 +8,7 @@
 
 #include <ros/ros.h>
 
-//OpenCV and CVbridge includes
+//  OpenCV and CVbridge includes
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
@@ -28,7 +28,10 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/surface/mls.h>
+#include <pcl/search/kdtree.h>
 
+// Sidewalk Filter
 #include "Sidewalk_Filter.h"
 
 static const std::string OPENCV_WINDOW = "Image window";
@@ -47,16 +50,16 @@ class SidewalkDetector
 public:
   SidewalkDetector():it_(nh)
   {
-  	ros::NodeHandle pnh;
+    ros::NodeHandle pnh;
     // Subscriber and publisher for point cloud stream 
      point_cloud_sub = nh.subscribe ("/camera/depth/points", 1, &SidewalkDetector::point_cloud_cb, this);
-     pub_in = nh.advertise<sensor_msgs::PointCloud2> ("/camera/depth/points_in", 1);
-     pub_out = nh.advertise<sensor_msgs::PointCloud2> ("/camera/depth/points_out", 1);
+     pub_in = nh.advertise<sensor_msgs::PointCloud2> ("/sidewalk_detector/depth/points_in", 1);
+     pub_out = nh.advertise<sensor_msgs::PointCloud2> ("/sidewalk_detector/depth/points_out", 1);
     //ros::Subscriber rgb_sub = nh.subscribe ("/camera/color/image_raw", 1, rgd_cb);
 
     // Subscribers & Publishers for RGB stream using cv_bridge
     image_sub_ = it_.subscribe("/camera/color/image_raw", 1, &SidewalkDetector::rgbCb, this);
-    image_pub_ = it_.advertise("/camera/modified_raw/", 1);
+    image_pub_ = it_.advertise("/sidewalk_detector/color/image_raw", 1);
     
     cv::namedWindow(OPENCV_WINDOW);
     
@@ -105,7 +108,7 @@ public:
     //Gaussian Blurring
     for ( int i = 1; i < 25; i = i + 2 )
     { 
-    	cv::GaussianBlur( cv_ptr->image, filtered_image, cv::Size( i, i ), 0, 0 );
+      cv::GaussianBlur( cv_ptr->image, filtered_image, cv::Size( i, i ), 0, 0 );
       //if( cv::display_dst( DELAY_BLUR ) != 0 ) { return 0; } 
     }
     //HSV Color Conversion
@@ -120,12 +123,14 @@ public:
     
     if(!reduction_mask.empty())
     {
-      //cv::bitwise_and(background_mask,reduction_mask,background_mask,cv::Mat());	
+      //cv::bitwise_and(background_mask,reduction_mask,background_mask,cv::Mat());  
       background_mask = background_mask + reduction_mask + simple_filter;
      }
+
+
  
     background_histogram = sf.histogram_finder(background_mask, filtered_image,false);   
-    reference_histogram = sf.histogram_finder(reference_mask, filtered_image,false);	
+    reference_histogram = sf.histogram_finder(reference_mask, filtered_image,false);  
     lucky_mask = sf.back_projection(background_histogram,reference_histogram,filtered_image,false);  
     
     //Update the detected sidewalk with the training area to find an updated training histogram.
@@ -164,7 +169,7 @@ public:
   }
 void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
 
-	/*
+  
     // Create a container for the data.
   sensor_msgs::PointCloud2 output;
   sensor_msgs::PointCloud2 in_points;
@@ -172,7 +177,7 @@ void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
   pcl::PCLPointCloud2 voxel;
   //pcl::PointCloud<pcl::PointXYZRGB> input_cloud;
 
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr raw_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud (new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr input_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);  
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>), cloud_p (new pcl::PointCloud<pcl::PointXYZRGB>), cloud_f (new pcl::PointCloud<pcl::PointXYZRGB>);
   
@@ -182,11 +187,6 @@ void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
   
   //pcl::PCLPointCloud2 cloud_filtered;
  
-  // Convert to PCL data type
-  
-  // Perform the actual filtering
- 
-  // Do data processing here...
   output = *msg;
   pcl::fromROSMsg (*msg,*raw_cloud);
   
@@ -197,12 +197,42 @@ void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
   sor.filter (voxel);
   
   pcl::fromPCLPointCloud2(voxel,*cloud_filtered);
-
+  //pcl::removeNaNFromPointCloud(*cloud, *cloud, mapping);
   
+
+
+  //Smoothing out the point cloud
+  // The output will also contain the normals.
+  
+
+  /*
+  pcl::PointCloud<pcl::PointNormal>::Ptr smoothedCloud(new pcl::PointCloud<pcl::PointNormal>); 
+
+  pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> filter;
+  
+  filter.setInputCloud(raw_cloud);
+  // Use all neighbors in a radius of 3cm.
+  filter.setSearchRadius(0.03);
+  // If true, the surface and normal are approximated using a polynomial estimation
+  // (if false, only a tangent one).
+  filter.setPolynomialFit(true);
+  // We can tell the algorithm to also compute smoothed normals (optional).
+  filter.setComputeNormals(true);
+  // kd-tree object for performing searches.
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree;
+  filter.setSearchMethod(kdtree);
+ 
+  filter.process(*smoothedCloud);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr mls_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+  copyPointCloud(*smoothedCloud,*mls_cloud);
+*/
+
+
+  // Create the filtering object
   pcl::PassThrough<pcl::PointXYZRGB> pass;
-  pass.setInputCloud (raw_cloud);
+  pass.setInputCloud (cloud_filtered);
   pass.setFilterFieldName ("y");
-  pass.setFilterLimits (-1, -0.5);
+  pass.setFilterLimits (-1.5, -0.2);
   pass.filter (*input_cloud);
   pass.setFilterLimitsNegative (true);
   pass.filter (*cloud_filtered);
@@ -242,9 +272,6 @@ void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
   // Publish the data.
  pub_in.publish(in_points);
  pub_out.publish(out_points);
-
-*/
-
 
 }
 };
