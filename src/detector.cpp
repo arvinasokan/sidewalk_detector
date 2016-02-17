@@ -1,3 +1,11 @@
+/*
+   / \   _ ____   _(_)_ __      / \   ___  ___ | | ____ _ _ __  
+  / _ \ | '__\ \ / / | '_ \    / _ \ / __|/ _ \| |/ / _` | '_ \ 
+ / ___ \| |   \ V /| | | | |  / ___ \\__ \ (_) |   < (_| | | | |
+/_/   \_\_|    \_/ |_|_| |_| /_/   \_\___/\___/|_|\_\__,_|_| |_|
+                                                                
+*/
+
 #include <ros/ros.h>
 
 //OpenCV and CVbridge includes
@@ -12,34 +20,50 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/surface/mls.h>
+#include <pcl/search/kdtree.h>
+
 
 #include "Sidewalk_Filter.h"
+#include "EGBS.h"
 
 static const std::string OPENCV_WINDOW = "Image window";
+
 
 class SidewalkDetector
 {
   ros::NodeHandle nh;
-  ros::Publisher pub;
+  ros::Publisher pub_in,pub_out;
   ros::Subscriber point_cloud_sub;
   image_transport::ImageTransport it_;
   image_transport::Subscriber image_sub_;
   image_transport::Publisher image_pub_;
   Sidewalk_Filter sf;
+  cv::Mat reduction_mask,additive_mask;
 public:
   SidewalkDetector():it_(nh)
   {
   	ros::NodeHandle pnh;
     // Subscriber and publisher for point cloud stream 
      point_cloud_sub = nh.subscribe ("/camera/depth/points", 1, &SidewalkDetector::point_cloud_cb, this);
-     pub = nh.advertise<sensor_msgs::PointCloud2> ("/camera/depth/segmented", 1);
+     pub_in = nh.advertise<sensor_msgs::PointCloud2> ("/sidewalk_detector/depth/points_in", 1);
+     pub_out = nh.advertise<sensor_msgs::PointCloud2> ("/sidewalk_detector/depth/points_out", 1);
     //ros::Subscriber rgb_sub = nh.subscribe ("/camera/color/image_raw", 1, rgd_cb);
 
     // Subscribers & Publishers for RGB stream using cv_bridge
     image_sub_ = it_.subscribe("/camera/color/image_raw", 1, &SidewalkDetector::rgbCb, this);
-    image_pub_ = it_.advertise("/camera/modified_raw/", 1);
-
+    image_pub_ = it_.advertise("/sidewalk_detector/color/image_raw", 1);
+    
     cv::namedWindow(OPENCV_WINDOW);
+    
   }
 
   ~SidewalkDetector()
@@ -59,49 +83,148 @@ public:
       ROS_ERROR("cv_bridge exception: %s", e.what());
       return;
     }
+
+    std::vector<cv::Mat> channels; 
+    cv::Mat img_hist_equalized;
     //Rotating the image, transpose and flip is effective   
     cv::transpose(cv_ptr->image, cv_ptr->image);   
     cv::flip(cv_ptr->image, cv_ptr->image,1);   
     cv::transpose(cv_ptr->image, cv_ptr->image);
     cv::flip(cv_ptr->image, cv_ptr->image,1);
-    cv::Mat hsi_image;
-    cv::Mat filtered_image;
-    //int display_dst( int delay );
-    //int DELAY_BLUR = 100;
+    cv::Size size(640,480);
+    cv::Mat source = cv_ptr->image;
+    cv::Mat image = cv_ptr->image;
+    cv::resize(source,image,size);
+    float sigma             = 1;      /* For internal gaussian blurring usage only */
+    float threshold         = 1250;     /* Bigger threshold means bigger clusters */
+    int min_component_size  = 50;       /* Weed out clusters that are smaller than this size */
 
-    for ( int i = 1; i < 7; i = i + 2 )
-    { 
-    	cv::GaussianBlur( cv_ptr->image, filtered_image, cv::Size( i, i ), 0, 0 );
-      //if( cv::display_dst( DELAY_BLUR ) != 0 ) { return 0; } 
-    }
-    hsi_image = sf.rgb_to_hsi(filtered_image);
-    hsi_image = sf.trapezoidal_roi(hsi_image);
+    EGBS egbs;
+    egbs.applySegmentation( image, sigma, threshold, min_component_size );
     
-
-    //cv::Mat hist_hsi = sf.histogram_finder(hsi_image, filtered_image);
-    // Update GUI Window
-    cv::imshow(OPENCV_WINDOW, hsi_image);
+    cv::Mat random_color  = egbs.recolor(true);
+    cv::Mat average_color = egbs.recolor(false);
+    
+    
+    //cv::imshow( "original", image );
+    //cv::imshow( "average color", average_color );
+    cv::imshow( "random color", random_color );
     cv::waitKey(1);
-    
+    sensor_msgs::ImagePtr rgb_out = cv_bridge::CvImage(std_msgs::Header(), "bgr8", random_color).toImageMsg();
     // Output modified video stream
-    image_pub_.publish(cv_ptr->toImageMsg());
+    image_pub_.publish(rgb_out);
   }
-
-  void point_cloud_cb (const sensor_msgs::PointCloud2ConstPtr& msg)
-{
-  // Create a container for the data.
+void point_cloud_cb(const sensor_msgs::PointCloud2ConstPtr& msg){
+/*
+	
+    // Create a container for the data.
   sensor_msgs::PointCloud2 output;
+  sensor_msgs::PointCloud2 in_points;
+  sensor_msgs::PointCloud2 out_points;
+  pcl::PCLPointCloud2 voxel;
+  //pcl::PointCloud<pcl::PointXYZRGB> input_cloud;
 
-  // Do data processing here...
+  pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr input_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);  
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>), cloud_p (new pcl::PointCloud<pcl::PointXYZRGB>), cloud_f (new pcl::PointCloud<pcl::PointXYZRGB>);
+  
+  pcl::PCLPointCloud2* cloud = new pcl::PCLPointCloud2; 
+  pcl::PCLPointCloud2ConstPtr cloudPtr(cloud);
+  pcl_conversions::toPCL(*msg, *cloud);
+  
+  //pcl::PCLPointCloud2 cloud_filtered;
+ 
   output = *msg;
+  pcl::fromROSMsg (*msg,*raw_cloud);
+  
+  
+  pcl::VoxelGrid<pcl::PCLPointCloud2> sor;
+  sor.setInputCloud (cloudPtr);
+  sor.setLeafSize (0.1, 0.1, 0.1);
+  sor.filter (voxel);
+  
+  pcl::fromPCLPointCloud2(voxel,*cloud_filtered);
+  //pcl::removeNaNFromPointCloud(*cloud, *cloud, mapping);
+  
+
+
+  //Smoothing out the point cloud
+	// The output will also contain the normals.
+  
+
+  /*
+  pcl::PointCloud<pcl::PointNormal>::Ptr smoothedCloud(new pcl::PointCloud<pcl::PointNormal>); 
+
+  pcl::MovingLeastSquares<pcl::PointXYZ, pcl::PointNormal> filter;
+	
+  filter.setInputCloud(raw_cloud);
+	// Use all neighbors in a radius of 3cm.
+  filter.setSearchRadius(0.03);
+	// If true, the surface and normal are approximated using a polynomial estimation
+	// (if false, only a tangent one).
+  filter.setPolynomialFit(true);
+	// We can tell the algorithm to also compute smoothed normals (optional).
+  filter.setComputeNormals(true);
+	// kd-tree object for performing searches.
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree;
+  filter.setSearchMethod(kdtree);
+ 
+  filter.process(*smoothedCloud);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr mls_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+  copyPointCloud(*smoothedCloud,*mls_cloud);
+
+
+
+  // Create the filtering object
+  pcl::PassThrough<pcl::PointXYZRGB> pass;
+  pass.setInputCloud (cloud_filtered);
+  pass.setFilterFieldName ("y");
+  pass.setFilterLimits (-1.5, -0.2);
+  pass.filter (*input_cloud);
+  pass.setFilterLimitsNegative (true);
+  pass.filter (*cloud_filtered);
+
+  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients ());
+  pcl::PointIndices::Ptr inliers (new pcl::PointIndices ());
+  // Create the segmentation object
+  pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+  // Optional
+  seg.setOptimizeCoefficients (true);
+  // Mandatory
+  seg.setModelType (pcl::SACMODEL_PLANE);
+  seg.setMethodType (pcl::SAC_RANSAC);
+  //seg.setMaxIterations (1000);
+  seg.setDistanceThreshold (0.05);
+    // Create the filtering object
+  seg.setInputCloud (input_cloud);
+  seg.segment (*inliers, *coefficients); 
+
+  pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+  extract.setInputCloud (input_cloud);
+  extract.setIndices (inliers);
+  
+  //extracting Points in
+  extract.setNegative (false);
+  extract.filter (*cloud_p);
+  //extracting Point out
+  extract.setNegative (true);
+  extract.filter (*cloud_f);
+  
+  //cloud_filtered.swap (cloud_f);
+  *cloud_f = *cloud_f + *cloud_filtered;
+
+  pcl::toROSMsg (*cloud_p, in_points);
+  pcl::toROSMsg (*cloud_f, out_points);    
 
   // Publish the data.
-  pub.publish (output);
+ pub_in.publish(in_points);
+ pub_out.publish(out_points);
+ */
+
 }
 };
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
   ros::init(argc, argv, "image_converter");
   SidewalkDetector ic;
   ros::spin();

@@ -192,9 +192,17 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+set(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
 
 add_library(Sidewalk_Filter src/Sidewalk_Filter)
 target_link_libraries(Sidewalk_Filter ${catkin_LIBRARIES})
 
+add_library(EGBS src/EGBS)
+target_link_libraries(EGBS ${catkin_LIBRARIES})
+
+add_library(DisjointSetForest src/DisjointSetForest)
+target_link_libraries(DisjointSetForest ${catkin_LIBRARIES})
+
+
 add_executable(detector src/detector.cpp)
-target_link_libraries(detector ${catkin_LIBRARIES} Sidewalk_Filter)
+target_link_libraries(detector ${catkin_LIBRARIES} Sidewalk_Filter EGBS DisjointSetForest)
